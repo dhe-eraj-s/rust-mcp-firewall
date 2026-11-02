@@ -1,0 +1,119 @@
+# Example policy for a filesystem MCP server, e.g.
+#
+#   mcp-firewall --config policy.toml -- \
+#     npx -y @modelcontextprotocol/server-filesystem ~/projects/demo
+#
+# Goal: the agent may read and edit files inside ~/projects/demo only, can
+# never run shell commands, and must get a human's approval before moving
+# files around. Every key below is optional; an empty file allows everything.
+
+[tools]
+# Glob patterns over tool names. Deny always wins over allow. When `allow` is
+# non-empty, anything not listed is hidden from tools/list and refused.
+allow = [
+  "read_*",
+  "list_*",
+  "search_files",
+  "get_file_info",
+  "directory_tree",
+  "write_file",
+  "edit_file",
+  "create_directory",
+  "move_file",
+]
+# Belt and braces: even if a later server version adds a command runner and
+# someone widens `allow`, these stay blocked.
+deny = ["*exec*", "*shell*", "run_*", "*command*"]
+# Refused with an explanatory error unless the client resends the call with
+# params._meta["mcp-firewall/confirmed"] = true after asking the user.
+require_confirmation = ["move_file"]
+
+# Argument constraints: [tool.<name>.args."<JSON pointer into arguments>"].
+# `path_under` resolves `..` and symlinks before comparing, so
+# "~/projects/demo/../.ssh/id_rsa" or a symlink pointing outside is refused.
+[tool.read_file.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.read_text_file.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.read_media_file.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.read_multiple_files.args."/paths"]
+# Arrays are checked element by element.
+path_under = ["~/projects/demo"]
+
+[tool.write_file.args."/path"]
+path_under = ["~/projects/demo"]
+required = true
+
+[tool.edit_file.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.list_directory.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.list_directory_with_sizes.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.get_file_info.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.directory_tree.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.create_directory.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.move_file.args."/source"]
+path_under = ["~/projects/demo"]
+
+[tool.move_file.args."/destination"]
+path_under = ["~/projects/demo"]
+
+[tool.search_files]
+# At most 20 searches per minute: a runaway agent loop gets cut off early.
+rate_limit = { calls = 20, per_secs = 60 }
+
+[tool.search_files.args."/path"]
+path_under = ["~/projects/demo"]
+
+[tool.search_files.args."/pattern"]
+# Regexes must match the whole value.
+regex = "[^\\n]{1,200}"
+
+[resources]
+# Glob patterns over resource URIs. `*` stops at `/`, `**` crosses it.
+deny = ["**/.env", "**/.git/**", "**/*.pem", "**/id_rsa*"]
+
+[secrets]
+# Redact credentials from every response (tool results, resources, errors).
+enabled = true
+# Also redact unknown token formats: runs of 32+ base64-ish characters that
+# mix upper case, lower case and digits with at least 4.5 bits of entropy
+# per character.
+entropy = true
+entropy_threshold = 4.5
+entropy_min_len = 32
+
+[[secrets.custom]]
+name = "internal_api_key"
+regex = "\\bdemo_live_[A-Za-z0-9]{24}\\b"
+
+[injection]
+# What to do when a tool result or tool description looks like a prompt
+# injection: "annotate" (add a warning the model sees), "redact" (cut the
+# matched text) or "block" (replace the result with an error / hide the tool).
+enabled = true
+action = "annotate"
+
+[[injection.extra_patterns]]
+name = "credential_request"
+regex = "(?i)\\b(?:paste|share|include)\\s+(?:your|the)\\s+(?:api\\s+key|password|token)"
+
+[rug_pull]
+# A tool whose description or schema changes after it was first listed is
+# hidden and its calls refused for the rest of the session ("block"), or
+# only reported in the audit log ("alert").
+action = "block"
